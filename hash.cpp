@@ -2,10 +2,13 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <chrono>
+#include <fstream>
+#include <unordered_set>
+#include <random>
 
 /*
  * Part 1.1: HashTable Implementation
- * This class implements a hash table with linear probing and configurable resize strategies
  */
 class HashTable {
 private:
@@ -13,25 +16,22 @@ private:
     size_t size;
     size_t count;
     float maxLoadFactor;
-    int resizeStrategy; // 1: double, 2: add 10000
+    int resizeStrategy;
 
-    // Part 1.1.4: Hash function for strings
     size_t hash(const std::string& str) {
         return std::hash<std::string>{}(str);
     }
 
-    // Part 1.1.5: Get index using modulo operation
     size_t getIndex(const std::string& str) {
         return hash(str) % size;
     }
 
-    // Part 1.1.10: Resize and rehash the table
     void resize() {
         size_t oldSize = size;
         if (resizeStrategy == 1) {
-            size *= 2; // Strategy 1: double the size
+            size *= 2;
         } else {
-            size += 10000; // Strategy 2: add 10000
+            size += 10000;
         }
 
         std::vector<std::string> oldTable = table;
@@ -39,7 +39,6 @@ private:
         table.resize(size);
         count = 0;
 
-        // Rehash all existing elements
         for (const auto& str : oldTable) {
             if (!str.empty()) {
                 insert(str);
@@ -48,53 +47,38 @@ private:
     }
 
 public:
-    // Part 1.1.2: Constructor with configurable parameters
     HashTable(size_t initialSize = 16, float maxLoad = 0.75f, int strategy = 1)
         : size(initialSize), count(0), maxLoadFactor(maxLoad), resizeStrategy(strategy) {
         table.resize(size);
     }
 
-    // Part 1.1.6: Insert function
     void insert(const std::string& str) {
-        if (find(str)) { // Already exists
-            return;
-        }
+        if (find(str)) return;
 
-        // Part 1.1.10: Check if resize needed
         if ((float)(count + 1) / size > maxLoadFactor) {
             resize();
         }
 
         size_t index = getIndex(str);
         while (true) {
-            // Part 1.1.8: Linear probing for collision resolution
             if (table[index].empty()) {
                 table[index] = str;
                 count++;
-                return;
-            } else if (table[index] == str) {
                 return;
             }
             index = (index + 1) % size;
         }
     }
 
-    // Part 1.1.7: Find function
     bool find(const std::string& str) {
         size_t index = getIndex(str);
         size_t start = index;
         
         while (true) {
-            // Part 1.1.9: Find logic with linear probing
-            if (table[index].empty()) {
-                return false;
-            } else if (table[index] == str) {
-                return true;
-            }
+            if (table[index].empty()) return false;
+            if (table[index] == str) return true;
             index = (index + 1) % size;
-            if (index == start) { // Full table cycle
-                return false;
-            }
+            if (index == start) return false;
         }
     }
 
@@ -102,6 +86,9 @@ public:
     size_t getCount() const { return count; }
 };
 
+/*
+ * Part 1.2: Test Cases
+ */
 /*
  * Part 1.2: Test Cases for Correctness Verification
  */
@@ -235,7 +222,98 @@ void runTests() {
     }
 }
 
+/*
+ * Milestone 2 Implementation
+ */
+std::vector<std::string> generateUniqueStrings(int count) {
+    std::unordered_set<std::string> generated;
+    std::vector<std::string> result;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(10000000, 99999999);
+
+    while(result.size() < count) {
+        std::string num = std::to_string(dis(gen));
+        if(generated.insert(num).second) {
+            result.push_back(num);
+        }
+    }
+    return result;
+}
+
+void timeRehashCost() {
+    std::ofstream out("rehash_times.csv");
+    out << "q,no_rehash,doubling,addition\n";
+    
+    auto wholeList = generateUniqueStrings(131072);
+    
+    for(int q = 4; q <= 17; q++) {
+        int num_values = (0.75 * (1 << q)) - 1;
+        
+        // No Rehash
+        auto start = std::chrono::high_resolution_clock::now();
+        HashTable ht_no_rehash(1 << 17, 0.75f, 1);
+        for(int i=0; i<num_values; i++) ht_no_rehash.insert(wholeList[i]);
+        auto time_no_rehash = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - start).count();
+        
+        // Doubling
+        start = std::chrono::high_resolution_clock::now();
+        HashTable ht_double(1 << q, 0.75f, 1);
+        for(int i=0; i<num_values; i++) ht_double.insert(wholeList[i]);
+        auto time_double = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - start).count();
+        
+        // Addition
+        start = std::chrono::high_resolution_clock::now();
+        HashTable ht_add(1 << q, 0.75f, 2);
+        for(int i=0; i<num_values; i++) ht_add.insert(wholeList[i]);
+        auto time_add = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - start).count();
+
+        out << q << "," 
+            << time_no_rehash/num_values << ","
+            << time_double/num_values << ","
+            << time_add/num_values << "\n";
+    }
+}
+
+void timeLoadFactor() {
+    auto wholeList = generateUniqueStrings(131072);
+    std::vector<std::string> addValues(wholeList.begin(), wholeList.begin() + 65536);
+    std::vector<std::string> checkValues(wholeList.begin() + 65536, wholeList.end());
+
+    std::ofstream out("load_factor_times.csv");
+    out << "load_factor,success_time,fail_time\n";
+    
+    HashTable ht(65536, 1.0f, 1);
+    
+    for(double target_lf = 0.1; target_lf < 0.99; target_lf += 0.03) {
+        int target_count = target_lf * 65536;
+        while(ht.getCount() < target_count) {
+            ht.insert(addValues[ht.getCount()]);
+        }
+        
+        // Successful searches
+        auto start = std::chrono::high_resolution_clock::now();
+        for(int i=0; i<target_count; i++) ht.find(addValues[i]);
+        double succ_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now() - start).count() / target_count;
+        
+        // Unsuccessful searches
+        start = std::chrono::high_resolution_clock::now();
+        for(int i=0; i<target_count; i++) ht.find(checkValues[i]);
+        double fail_time = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now() - start).count() / target_count;
+        
+        out << target_lf << "," << succ_time << "," << fail_time << "\n";
+    }
+}
+
 int main() {
     runTests();
+    timeRehashCost();
+    timeLoadFactor();
+    std::cout << "Data files generated. Use Python script for plotting.\n";
     return 0;
 }
